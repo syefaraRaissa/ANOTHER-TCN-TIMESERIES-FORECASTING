@@ -1,1 +1,8 @@
+streamlit
+tensorflow
+keras-tcn
+pandas
+numpy
+scikit-learn
+joblib
 
