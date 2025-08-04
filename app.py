@@ -12,7 +12,7 @@ st.title("🔮 Prediksi Tag Value 10 Menit Ke Depan (per 10 Detik)")
 # Load model dan scaler
 @st.cache_resource
 def load_model_and_scaler():
-    model = load_model("my_model.h5", custom_objects={'TCN': TCN})
+    model = load_model("my_model.keras", custom_objects={'TCN': TCN})
     scaler = joblib.load("scalercp.pkl")
     return model, scaler
 
@@ -38,9 +38,6 @@ if uploaded_file is not None:
         else:
             # Ambil 60 data terakhir
             last_sequence = df['tag_value'].values[-sequence_length:].reshape(-1, 1)
-
-            # Simpan nilai asli terakhir (jika diperlukan untuk perbandingan)
-            last_real_value = last_sequence[-1][0]
 
             # Normalisasi dan reshape
             scaled_sequence = scaler.transform(last_sequence)
