@@ -13,8 +13,8 @@ st.title("🔮 Prediksi Tag Value 10 Menit Ke Depan (per 10 Detik)")
 @st.cache_resource
 def load_artifacts():
     try:
-        model = load_model("tcn_timeseries_model.keras", compile=False, custom_objects={"TCN": TCN})
-        scaler = joblib.load("scaler.joblib")
+        model = load_model("my_model.keras", compile=False, custom_objects={"TCN": TCN})
+        scaler = joblib.load("scalercp.joblib")
         return model, scaler
     except Exception as e:
         st.error(f"Gagal memuat model atau scaler: {e}")
