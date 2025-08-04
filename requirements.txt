@@ -1,7 +1,8 @@
-streamlit==1.29.0
-pandas==1.5.3
-numpy==1.23.5
-matplotlib==3.7.1
-joblib==1.2.0
-tensorflow==2.11.0
-keras-tcn==3.5.0
+streamlit
+tensorflow>=2.12,<2.19
+scikit-learn
+pandas
+numpy
+matplotlib
+keras-tcn
+joblib
