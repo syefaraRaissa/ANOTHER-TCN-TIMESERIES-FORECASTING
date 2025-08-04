@@ -5,84 +5,66 @@ import joblib
 from datetime import timedelta
 from tensorflow.keras.models import load_model
 from tcn import TCN
-from sklearn.metrics import mean_absolute_error, mean_squared_error
 
-st.set_page_config(page_title="Prediksi Tag Value", layout="centered")
-st.title("🔮 Prediksi Tag Value 10 Menit Ke Depan (Setiap 10 Detik)")
+st.set_page_config(page_title="Prediksi Tag Value", layout="wide")
+st.title("🔮 Prediksi Tag Value 10 Menit Ke Depan (per 10 Detik)")
 
-# Fungsi caching untuk load model dan scaler
+# Load model dan scaler
 @st.cache_resource
-def load_artifacts():
-    try:
-        model = load_model("my_model.keras", compile=False, custom_objects={"TCN": TCN})
-        scaler = joblib.load("scaler.joblib")
-        return model, scaler
-    except Exception as e:
-        st.error(f"Gagal memuat model atau scaler: {e}")
-        st.stop()
+def load_model_and_scaler():
+    model = load_model("my_model.h5", custom_objects={'TCN': TCN})
+    scaler = joblib.load("scalercp.pkl")
+    return model, scaler
 
-model, scaler = load_artifacts()
+model, scaler = load_model_and_scaler()
 
-WINDOW_SIZE = 60      # Input: 5 menit sebelumnya (30 titik data)
-FUTURE_STEPS = 60     # Output: 10 menit ke depan (60 titik data)
+# Upload data CSV
+uploaded_file = st.file_uploader("📥 Upload data CSV (minimal 60 baris)", type=["csv"])
 
-uploaded_file = st.file_uploader("📂 Upload File CSV", type=["csv"])
+if uploaded_file is not None:
+    df = pd.read_csv(uploaded_file)
 
-if uploaded_file:
-    try:
-        df = pd.read_csv(uploaded_file)
+    if 'tag_value' not in df.columns:
+        st.error("❌ Kolom 'tag_value' tidak ditemukan. Harap pastikan file memiliki kolom 'tag_value'.")
+    else:
+        st.success("✅ File berhasil dibaca!")
+        st.write("Contoh data terakhir:")
+        st.dataframe(df.tail())
 
-        if 'ddate' not in df.columns or 'tag_value' not in df.columns:
-            st.error("❌ CSV harus memiliki kolom 'ddate' dan 'tag_value'.")
+        sequence_length = 60
+
+        if len(df) < sequence_length:
+            st.warning("⚠️ Data kurang dari 60 baris. Harap upload data minimal 10 menit (60 baris per 10 detik).")
         else:
-            df['ddate'] = pd.to_datetime(df['ddate'])
-            df = df.sort_values('ddate').reset_index(drop=True)
+            # Ambil 60 data terakhir
+            last_sequence = df['tag_value'].values[-sequence_length:].reshape(-1, 1)
 
-            st.subheader("📊 Data Terakhir:")
-            st.dataframe(df.tail(5))
+            # Simpan nilai asli terakhir (jika diperlukan untuk perbandingan)
+            last_real_value = last_sequence[-1][0]
 
-            if len(df) < WINDOW_SIZE:
-                st.error(f"❌ Minimal {WINDOW_SIZE} baris diperlukan.")
+            # Normalisasi dan reshape
+            scaled_sequence = scaler.transform(last_sequence)
+            input_sequence = scaled_sequence.reshape(1, sequence_length, 1)
+
+            # Prediksi
+            prediction_scaled = model.predict(input_sequence)
+            prediction = scaler.inverse_transform(prediction_scaled.reshape(-1, 1)).flatten()
+
+            # Buat waktu prediksi
+            if 'timestamp' in df.columns:
+                last_time = pd.to_datetime(df['timestamp'].iloc[-1])
+                time_range = pd.date_range(start=last_time + timedelta(seconds=10), periods=60, freq="10S")
             else:
-                last_values = df['tag_value'].values[-WINDOW_SIZE:]
-                scaled_input = scaler.transform(last_values.reshape(-1, 1)).reshape(1, WINDOW_SIZE, 1)
+                time_range = [f"Step {i+1}" for i in range(60)]
 
-                forecast = []
-                current_input = scaled_input.copy()
+            # Tampilkan hasil
+            pred_df = pd.DataFrame({
+                "Waktu": time_range,
+                "Prediksi Tag Value": prediction
+            })
 
-                for _ in range(FUTURE_STEPS):
-                    pred = model.predict(current_input, verbose=0)[0, 0]
-                    forecast.append(pred)
-                    current_input = np.append(current_input[:, 1:, :], [[[pred]]], axis=1)
+            st.subheader("📈 Hasil Prediksi (60 langkah ke depan)")
+            st.line_chart(pred_df.set_index("Waktu"))
 
-                forecast_actual = scaler.inverse_transform(np.array(forecast).reshape(-1, 1))
-
-                last_time = df['ddate'].iloc[-1]
-                future_times = [last_time + timedelta(seconds=10 * (i + 1)) for i in range(FUTURE_STEPS)]
-
-                result_df = pd.DataFrame({
-                    'Datetime': future_times,
-                    'Prediksi Tag Value': forecast_actual.flatten()
-                })
-
-                st.subheader("📈 Grafik Prediksi")
-                st.line_chart(result_df.set_index("Datetime"))
-
-                st.subheader("📋 Tabel Prediksi")
-                st.dataframe(result_df)
-
-                if len(df) >= WINDOW_SIZE + FUTURE_STEPS:
-                    actual_future = df['tag_value'].values[-FUTURE_STEPS:]
-                    mae = mean_absolute_error(actual_future, forecast_actual)
-                    rmse = np.sqrt(mean_squared_error(actual_future, forecast_actual))
-
-                    st.subheader("📉 Evaluasi Model (Data Uji)")
-                    st.markdown(f"""
-                    - **MAE**: {mae:.4f}  
-                    - **RMSE**: {rmse:.4f}
-                    """)
-                else:
-                    st.warning("⚠️ Data tidak cukup untuk evaluasi (butuh data aktual setelah input).")
-
-    except Exception as e:
-        st.error(f"❌ Error saat memproses data: {e}")
+            with st.expander("📋 Tabel Prediksi"):
+                st.dataframe(pred_df)
