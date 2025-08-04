@@ -7,7 +7,7 @@ from tensorflow.keras.models import load_model
 from tcn import TCN
 
 # Judul
-st.title("🔮 Prediksi Tag Value 10 Menit Ke Depan (per 10 Detik)")
+st.title("🔮 Prediksi Tag Value 10 Menit Ke Depan (Tanpa Noise)")
 
 # Parameter model
 WINDOW_SIZE = 60     # Jumlah titik data sebelumnya (60 x 10 detik = 10 menit)
@@ -18,7 +18,7 @@ FUTURE_STEPS = 60    # Jumlah langkah prediksi (10 detik x 60 = 10 menit)
 def load_artifacts():
     try:
         model = load_model("my_model.keras", compile=False, custom_objects={"TCN": TCN})
-        scaler = joblib.load("scalercp.joblib")  # ← pastikan ini sama seperti di Colab
+        scaler = joblib.load("scalercp.joblib")
         return model, scaler
     except Exception as e:
         st.error(f"Gagal memuat model atau scaler: {e}")
@@ -41,24 +41,22 @@ if uploaded_file:
         if len(df) < WINDOW_SIZE:
             st.error(f"❌ Data kurang. Minimal {WINDOW_SIZE} baris diperlukan.")
         else:
-            # Ambil WINDOW_SIZE terakhir
+            # Ambil WINDOW_SIZE terakhir dari data
             last_values = df['tag_value'].values[-WINDOW_SIZE:]
-
-            # Normalisasi
-            scaled_input = scaler.transform(last_values.reshape(-1, 1)).reshape(1, WINDOW_SIZE, 1)
+            scaled_input = scaler.transform(last_values.reshape(-1, 1))
 
             forecast_scaled = []
-            current_input = scaled_input.copy()
+            last_window = scaled_input.copy()
 
-            noise_std = 0.002  # Sesuai Colab
             for _ in range(FUTURE_STEPS):
-                next_pred = model.predict(current_input, verbose=0)
-                noisy_pred = next_pred + np.random.normal(0, noise_std, size=next_pred.shape)
-                forecast_scaled.append(noisy_pred[0, 0])
-                current_input = np.append(current_input[:, 1:, :], [[[noisy_pred[0, 0]]]], axis=1)
+                input_data = last_window.reshape((1, WINDOW_SIZE, 1))
+                next_pred = model.predict(input_data, verbose=0)[0, 0]
+                forecast_scaled.append(next_pred)
 
+                # Update window dengan prediksi (tanpa noise)
+                last_window = np.append(last_window[1:], [[next_pred]], axis=0)
 
-            # Inverse transform
+            # Inverse transform hasil prediksi
             forecast_actual = scaler.inverse_transform(np.array(forecast_scaled).reshape(-1, 1)).flatten()
 
             # Buat waktu prediksi
@@ -66,14 +64,14 @@ if uploaded_file:
             future_times = [last_time + timedelta(seconds=10 * (i + 1)) for i in range(FUTURE_STEPS)]
 
             forecast_df = pd.DataFrame({
-                "Datetime": future_times,
-                "Prediksi Tag Value": forecast_actual
+                "Tanggal": future_times,
+                "Prediksi Tag Value (Tanpa Noise)": forecast_actual
             })
 
-            st.subheader("📈 Grafik Prediksi")
-            st.line_chart(forecast_df.set_index("Datetime"))
+            st.subheader("📈 Grafik Prediksi (Tanpa Noise)")
+            st.line_chart(forecast_df.set_index("Tanggal"))
 
-            st.subheader("📋 Tabel Prediksi")
+            st.subheader("📋 Tabel Prediksi (Tanpa Noise)")
             st.dataframe(forecast_df)
 
     except Exception as e:
