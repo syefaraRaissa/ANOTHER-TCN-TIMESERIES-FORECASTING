@@ -2,77 +2,90 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
+from datetime import timedelta
 from tensorflow.keras.models import load_model
+from tcn import TCN
 from sklearn.metrics import mean_absolute_error, mean_squared_error
-import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="Prediksi 10 Menit ke Depan", layout="centered")
+st.title("🔮 Prediksi Tag Value 10 Menit Ke Depan (per 10 Detik)")
 
-st.title("🔮 Prediksi Tag Value 10 Menit ke Depan")
-st.markdown("Upload file CSV dengan kolom `TagValue`, sistem akan memprediksi nilai 10 menit ke depan berdasarkan 30 data terakhir.")
-
-# Load model dan scaler
+# Fungsi caching untuk load model dan scaler
 @st.cache_resource
 def load_artifacts():
-    model = load_model("my_model.h5", compile=False)
-    scaler = joblib.load("scalercp.pkl")
-    return model, scaler
+    try:
+        model = load_model("tcn_timeseries_model.keras", compile=False, custom_objects={"TCN": TCN})
+        scaler = joblib.load("scaler.joblib")
+        return model, scaler
+    except Exception as e:
+        st.error(f"Gagal memuat model atau scaler: {e}")
+        st.stop()
 
+# Muat model dan scaler
 model, scaler = load_artifacts()
 
-# Upload file CSV
-uploaded_file = st.file_uploader("📂 Unggah file CSV", type=["csv"])
-if uploaded_file is not None:
+WINDOW_SIZE = 30      # jumlah data input (10 detik * 60 = 10 menit sebelumnya)
+FUTURE_STEPS = 60     # jumlah langkah prediksi (10 detik * 60 = 10 menit ke depan)
+
+# Upload CSV
+uploaded_file = st.file_uploader("📂 Upload File CSV", type=["csv"])
+
+if uploaded_file:
     df = pd.read_csv(uploaded_file)
 
-    if 'TagValue' not in df.columns:
-        st.error("❌ Kolom 'TagValue' tidak ditemukan.")
-    else:
-        st.success("✅ File berhasil diunggah!")
+    try:
+        # Preprocessing kolom waktu dan urutkan
+        df['ddate'] = pd.to_datetime(df['ddate'])
+        df = df.sort_values('ddate').reset_index(drop=True)
 
-        st.subheader("📊 Data Asli (10 Terakhir)")
-        st.dataframe(df.tail(10))
+        st.subheader("📊 Data Terakhir:")
+        st.dataframe(df.tail(5))
 
-        # Ambil 30 data terakhir
-        data_window = df['TagValue'].values[-30:]
-        
-        if len(data_window) < 30:
-            st.warning("⚠️ Data tidak cukup. Diperlukan minimal 30 titik data (misalnya 10 menit terakhir jika data per 10 detik).")
+        if len(df) < WINDOW_SIZE:
+            st.error(f"❌ Data kurang. Minimal {WINDOW_SIZE} baris diperlukan.")
         else:
-            # Skala data dan bentuk input
-            scaled_input = scaler.transform(data_window.reshape(-1, 1))
-            X_input = scaled_input.reshape(1, 30, 1)
+            # Ambil 60 nilai terakhir sebagai input
+            last_values = df['tag_value'].values[-WINDOW_SIZE:]
+            scaled_input = scaler.transform(last_values.reshape(-1, 1)).reshape(1, WINDOW_SIZE, 1)
 
-            # Prediksi
-            y_pred_scaled = model.predict(X_input)
-            y_pred = scaler.inverse_transform(y_pred_scaled)[0][0]  # Ambil nilai float prediksi
+            forecast = []
+            current_input = scaled_input
 
-            st.subheader("📈 Hasil Prediksi:")
-            st.write(f"**Prediksi nilai 10 menit ke depan:** `{y_pred:.2f}`")
+            # Prediksi 60 langkah ke depan
+            for _ in range(FUTURE_STEPS):
+                pred = model.predict(current_input, verbose=0)[0, 0]
+                forecast.append(pred)
+                current_input = np.append(current_input[:, 1:, :], [[[pred]]], axis=1)
 
-            # --- Evaluasi Model (jika data aktual tersedia)
-            if len(df) >= 31:
-                y_actual = df['TagValue'].values[-1]
-                y_pred_arr = np.array([y_pred])
-                y_true = np.array([y_actual])
+            # Kembalikan ke skala asli
+            forecast_actual = scaler.inverse_transform(np.array(forecast).reshape(-1, 1))
 
-                mae = mean_absolute_error(y_true, y_pred_arr)
-                rmse = mean_squared_error(y_true, y_pred_arr, squared=False)
+            last_time = df['ddate'].iloc[-1]
+            future_times = [last_time + timedelta(seconds=10 * (i + 1)) for i in range(FUTURE_STEPS)]
 
-                st.subheader("🧪 Evaluasi Model:")
-                st.write(f"**MAE (Mean Absolute Error):** {mae:.4f}")
-                st.write(f"**RMSE (Root Mean Squared Error):** {rmse:.4f}")
+            result_df = pd.DataFrame({
+                'Datetime': future_times,
+                'Prediksi Tag Value': forecast_actual.flatten()
+            })
+
+            st.subheader("📈 Grafik Prediksi")
+            st.line_chart(result_df.set_index("Datetime"))
+
+            st.subheader("📋 Tabel Prediksi")
+            st.dataframe(result_df)
+
+            # Evaluasi jika data cukup
+            if len(df) >= WINDOW_SIZE + FUTURE_STEPS:
+                actual_future = df['tag_value'].values[-FUTURE_STEPS:]
+                mae = mean_absolute_error(actual_future, forecast_actual)
+                rmse = np.sqrt(mean_squared_error(actual_future, forecast_actual))  # ← Ganti dengan aman
+
+                st.subheader("📉 Evaluasi Model (Data Uji)")
+                st.markdown(f"""
+                - *MAE (Mean Absolute Error)*: {mae:.4f}
+                - *RMSE (Root Mean Squared Error)*: {rmse:.4f}
+                """)
             else:
-                st.info("📌 Data aktual untuk evaluasi belum tersedia (dibutuhkan nilai aktual setelah 10 menit).")
+                st.warning("⚠️ Tidak cukup data untuk evaluasi MAE dan RMSE (diperlukan minimal 60 baris data aktual setelah input).")
 
-            # Grafik
-            st.subheader("📉 Grafik Tag Value & Prediksi")
-            fig, ax = plt.subplots()
-            time = list(range(-29, 1))  # -29 s.d. 0 untuk 30 data historis
-            ax.plot(time, data_window, label="Data Historis", marker='o')
-            ax.plot([1], [y_pred], label="Prediksi (+10 Menit)", marker='x', color='red')
-            ax.set_xlabel("Step (per 10 detik mundur)")
-            ax.set_ylabel("TagValue")
-            ax.set_title("TagValue Historis & Prediksi 10 Menit ke Depan")
-            ax.legend()
-            st.pyplot(fig)
+    except Exception as e:
+        st.error(f"❌ Error saat memproses data: {e}")
