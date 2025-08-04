@@ -18,7 +18,7 @@ FUTURE_STEPS = 60     # Output: 60 langkah ke depan (10 menit)
 @st.cache_resource
 def load_artifacts():
     try:
-        model = load_model("my_model.h5", custom_objects={"TCN": TCN})
+        model = load_model("my_model.h5", custom_objects={"TCN": TCN}, compile=False)
         scaler = joblib.load("scalercp.joblib")
         return model, scaler
     except Exception as e:
