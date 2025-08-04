@@ -2,66 +2,74 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
-from datetime import timedelta
 from tensorflow.keras.models import load_model
-from tcn import TCN
+from sklearn.metrics import mean_absolute_error, mean_squared_error
+import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="Prediksi Tag Value", layout="wide")
-st.title("🔮 Prediksi Tag Value 10 Menit Ke Depan (per 10 Detik)")
+st.set_page_config(page_title="Prediksi 10 Menit ke Depan", layout="centered")
+
+st.title("🔮 Prediksi Tag Value 10 Menit ke Depan")
+st.markdown("Upload file CSV dengan kolom `TagValue`, sistem akan memprediksi nilai 10 menit ke depan berdasarkan data terakhir.")
 
 # Load model dan scaler
 @st.cache_resource
-def load_model_and_scaler():
-    model = load_model("my_model.keras", custom_objects={'TCN': TCN})
+def load_artifacts():
+    model = load_model("my_model.h5", compile=False)
     scaler = joblib.load("scalercp.pkl")
     return model, scaler
 
-model, scaler = load_model_and_scaler()
+model, scaler = load_artifacts()
 
-# Upload data CSV
-uploaded_file = st.file_uploader("📥 Upload data CSV (minimal 60 baris)", type=["csv"])
-
+# Upload file
+uploaded_file = st.file_uploader("📂 Unggah file CSV", type=["csv"])
 if uploaded_file is not None:
     df = pd.read_csv(uploaded_file)
 
-    if 'tag_value' not in df.columns:
-        st.error("❌ Kolom 'tag_value' tidak ditemukan. Harap pastikan file memiliki kolom 'tag_value'.")
+    if 'TagValue' not in df.columns:
+        st.error("❌ Kolom 'TagValue' tidak ditemukan.")
     else:
-        st.success("✅ File berhasil dibaca!")
-        st.write("Contoh data terakhir:")
-        st.dataframe(df.tail())
+        st.success("✅ File berhasil diunggah!")
 
-        sequence_length = 60
+        st.subheader("📊 Data Asli (Terakhir)")
+        st.dataframe(df.tail(10))
 
-        if len(df) < sequence_length:
-            st.warning("⚠️ Data kurang dari 60 baris. Harap upload data minimal 10 menit (60 baris per 10 detik).")
+        # Ambil 30 data terakhir (untuk prediksi 10 menit ke depan, jika data tiap 10 detik)
+        data_window = df['TagValue'].values[-30:]
+        
+        if len(data_window) < 30:
+            st.warning("⚠️ Data tidak cukup. Dibutuhkan minimal 30 titik data.")
         else:
-            # Ambil 60 data terakhir
-            last_sequence = df['tag_value'].values[-sequence_length:].reshape(-1, 1)
-
-            # Normalisasi dan reshape
-            scaled_sequence = scaler.transform(last_sequence)
-            input_sequence = scaled_sequence.reshape(1, sequence_length, 1)
+            # Scaling
+            scaled_input = scaler.transform(data_window.reshape(-1, 1))
+            X_input = scaled_input.reshape(1, 30, 1)
 
             # Prediksi
-            prediction_scaled = model.predict(input_sequence)
-            prediction = scaler.inverse_transform(prediction_scaled.reshape(-1, 1)).flatten()
+            y_pred_scaled = model.predict(X_input)
+            y_pred = scaler.inverse_transform(y_pred_scaled)[0][0]
 
-            # Buat waktu prediksi
-            if 'timestamp' in df.columns:
-                last_time = pd.to_datetime(df['timestamp'].iloc[-1])
-                time_range = pd.date_range(start=last_time + timedelta(seconds=10), periods=60, freq="10S")
-            else:
-                time_range = [f"Step {i+1}" for i in range(60)]
+            st.subheader("📈 Hasil Prediksi:")
+            st.write(f"**Prediksi nilai 10 menit ke depan:** `{y_pred:.2f}`")
 
-            # Tampilkan hasil
-            pred_df = pd.DataFrame({
-                "Waktu": time_range,
-                "Prediksi Tag Value": prediction
-            })
+            # --- Evaluasi Model (jika tersedia data aktual 10 menit setelahnya)
+            st.subheader("🧪 Evaluasi Model (jika ada nilai aktual)")
+            if len(df) >= 31:
+                y_actual = df['TagValue'].values[-1]  # Nilai terakhir sebagai pembanding
+                y_true = np.array([y_actual])
+                y_pred_arr = np.array([y_pred])
+                mae = mean_absolute_error(y_true, y_pred_arr)
+                rmse = mean_squared_error(y_true, y_pred_arr, squared=False)
 
-            st.subheader("📈 Hasil Prediksi (60 langkah ke depan)")
-            st.line_chart(pred_df.set_index("Waktu"))
+                st.write(f"**MAE**: {mae:.4f}")
+                st.write(f"**RMSE**: {rmse:.4f}")
 
-            with st.expander("📋 Tabel Prediksi"):
-                st.dataframe(pred_df)
+            # Grafik
+            st.subheader("📉 Grafik Data & Prediksi")
+            fig, ax = plt.subplots()
+            time = list(range(-29, 1))  # -29 to 0 = 30 titik data historis
+            ax.plot(time, data_window, label="TagValue Historis", marker='o')
+            ax.plot([1], [y_pred], label="Prediksi +10 Menit", marker='x', color='red')
+            ax.set_xlabel("Waktu (step ke belakang)")
+            ax.set_ylabel("TagValue")
+            ax.set_title("TagValue Historis & Prediksi 10 Menit ke Depan")
+            ax.legend()
+            st.pyplot(fig)
