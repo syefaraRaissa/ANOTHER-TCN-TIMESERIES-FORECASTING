@@ -50,11 +50,13 @@ if uploaded_file:
             forecast_scaled = []
             current_input = scaled_input.copy()
 
+            noise_std = 0.002  # Sesuai Colab
             for _ in range(FUTURE_STEPS):
-                next_pred = model.predict(current_input, verbose=0)[0, 0]
-                forecast_scaled.append(next_pred)
-                # Update input window dengan nilai prediksi terbaru
-                current_input = np.append(current_input[:, 1:, :], [[[next_pred]]], axis=1)
+                next_pred = model.predict(current_input, verbose=0)
+                noisy_pred = next_pred + np.random.normal(0, noise_std, size=next_pred.shape)
+                forecast_scaled.append(noisy_pred[0, 0])
+                current_input = np.append(current_input[:, 1:, :], [[[noisy_pred[0, 0]]]], axis=1)
+
 
             # Inverse transform
             forecast_actual = scaler.inverse_transform(np.array(forecast_scaled).reshape(-1, 1)).flatten()
