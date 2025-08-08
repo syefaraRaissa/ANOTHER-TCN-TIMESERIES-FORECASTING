@@ -5,10 +5,9 @@ import joblib
 from datetime import timedelta
 from tensorflow.keras.models import load_model
 from tcn import TCN
-from sklearn.metrics import mean_squared_error, mean_absolute_error
 
 # Judul
-st.title("🔮 Prediksi Tag Value 10 Menit Ke Depan (Tanpa Noise)")
+st.title("🔮 Prediksi Tag Value 10 Menit Ke Depan")
 
 # Parameter model
 WINDOW_SIZE = 60     # 10 menit terakhir (60 x 10 detik)
@@ -33,6 +32,7 @@ if uploaded_file:
     df = pd.read_csv(uploaded_file)
 
     try:
+        # Pastikan kolom waktu benar
         df['ddate'] = pd.to_datetime(df['ddate'])
         df = df.sort_values('ddate').reset_index(drop=True)
 
@@ -42,21 +42,24 @@ if uploaded_file:
         if len(df) < WINDOW_SIZE:
             st.error(f"❌ Data kurang. Minimal {WINDOW_SIZE} baris diperlukan.")
         else:
-            # Ambil WINDOW_SIZE terakhir
+            # Ambil WINDOW_SIZE terakhir dan skala
             last_values = df['tag_value'].values[-WINDOW_SIZE:]
             scaled_input = scaler.transform(last_values.reshape(-1, 1))
 
             forecast_scaled = []
             last_window = scaled_input.copy()
 
+            # Loop prediksi
             for _ in range(FUTURE_STEPS):
                 input_data = last_window.reshape((1, WINDOW_SIZE, 1))
                 next_pred = model.predict(input_data, verbose=0)[0, 0]
                 forecast_scaled.append(next_pred)
                 last_window = np.append(last_window[1:], [[next_pred]], axis=0)
 
-            # Inverse transform hasil prediksi
-            forecast_actual = scaler.inverse_transform(np.array(forecast_scaled).reshape(-1, 1)).flatten()
+            # Kembalikan ke nilai asli
+            forecast_actual = scaler.inverse_transform(
+                np.array(forecast_scaled).reshape(-1, 1)
+            ).flatten()
 
             # Buat waktu prediksi
             last_time = df['ddate'].iloc[-1]
@@ -67,33 +70,13 @@ if uploaded_file:
                 "Prediksi Tag Value (Tanpa Noise)": forecast_actual
             })
 
-            st.subheader("📈 Grafik Prediksi (Tanpa Noise)")
+            # Tampilkan grafik
+            st.subheader("📈 Grafik Prediksi")
             st.line_chart(forecast_df.set_index("Tanggal"))
 
-            st.subheader("📋 Tabel Prediksi (Tanpa Noise)")
+            # Tampilkan tabel
+            st.subheader("📋 Tabel Prediksi")
             st.dataframe(forecast_df)
-
-            # EVALUASI
-            if 'actual' in df.columns:
-                actual_values = df['actual'].values[-FUTURE_STEPS:]
-
-                if len(actual_values) == FUTURE_STEPS:
-                    mse = mean_squared_error(actual_values, forecast_actual)
-                    rmse = np.sqrt(mse)
-                    mae = mean_absolute_error(actual_values, forecast_actual)
-                    mape = np.mean(np.abs((actual_values - forecast_actual) / actual_values)) * 100
-
-                    st.subheader("📉 Evaluasi Akurasi Prediksi")
-                    st.markdown(f"""
-                    - **MSE (Mean Squared Error)**: `{mse:.4f}`
-                    - **RMSE (Root Mean Squared Error)**: `{rmse:.4f}`
-                    - **MAE (Mean Absolute Error)**: `{mae:.4f}`
-                    - **MAPE (Mean Absolute Percentage Error)**: `{mape:.2f}%`
-                    """)
-                else:
-                    st.warning("⚠️ Jumlah data aktual (kolom `actual`) tidak sesuai dengan 60 langkah prediksi.")
-            else:
-                st.info("ℹ️ Tambahkan kolom `actual` di CSV untuk evaluasi akurasi prediksi.")
 
     except Exception as e:
         st.error(f"❌ Error saat memproses data: {e}")
