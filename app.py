@@ -67,7 +67,7 @@ if uploaded_file:
 
             forecast_df = pd.DataFrame({
                 "Tanggal": future_times,
-                "Prediksi Tag Value (Tanpa Noise)": forecast_actual
+                "Prediksi Tag Value": forecast_actual
             })
 
             # Tampilkan grafik
