@@ -5,6 +5,7 @@ import joblib
 from datetime import timedelta
 from tensorflow.keras.models import load_model
 from tcn import TCN
+import matplotlib.pyplot as plt
 
 # Judul
 st.title("🔮 Prediksi Tag Value 10 Menit Ke Depan")
@@ -70,11 +71,26 @@ if uploaded_file:
                 "Prediksi Tag Value": forecast_actual
             })
 
-            # Tampilkan grafik
+            # ---- Plot dengan Matplotlib ----
             st.subheader("📈 Grafik Prediksi")
-            st.line_chart(forecast_df.set_index("Tanggal"))
+            plt.figure(figsize=(8, 5))
 
-            # Tampilkan tabel
+            # Data historis
+            plt.plot(df['ddate'].iloc[-WINDOW_SIZE:], df['tag_value'].iloc[-WINDOW_SIZE:], 
+                     label='Data Historis', color='blue')
+
+            # Data prediksi
+            plt.plot(forecast_df['Tanggal'], forecast_df['Prediksi Tag Value'], 
+                     label='Prediksi', color='red')
+
+            plt.legend()
+            plt.xlabel("Waktu")
+            plt.ylabel("Tag Value")
+            plt.grid(True)
+            plt.xticks(rotation=45)
+            st.pyplot(plt)
+
+            # ---- Tabel prediksi ----
             st.subheader("📋 Tabel Prediksi")
             st.dataframe(forecast_df)
 
